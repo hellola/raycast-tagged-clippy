@@ -1,4 +1,4 @@
-import { getSelectedText, ActionPanel, Action, List, closeMainWindow } from "@raycast/api";
+import { getSelectedText, ActionPanel, Action, List, closeMainWindow, openExtensionPreferences } from "@raycast/api";
 // import { useFetch, Response } from "@raycast/utils";
 import { useState, useEffect } from "react";
 // import { URLSearchParams } from "node:url";
