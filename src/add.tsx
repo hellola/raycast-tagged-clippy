@@ -1,26 +1,53 @@
-import { Form, ActionPanel, Action } from "@raycast/api";
+import { LocalStorage, Form, ActionPanel, Action } from "@raycast/api";
 import { Response } from "@raycast/utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 // import { URLSearchParams } from "node:url";
 import { createClient } from "redis";
-import { Clipboard } from "@raycast/api";
-import { redisKey } from "./conf";
+import { Clipboard, Toast, showToast } from "@raycast/api";
+import { redisKey, CONNECTION_KEY, DEFAULT_URL } from "./conf";
 
 export type RedisClientType = ReturnType<typeof createClient>;
 
 export default function Command() {
   // const [searchText, setSearchText] = useState("");
   const [redis, setRedis] = useState<RedisClientType>();
+  const [errored, setErrored] = useState<boolean>(false);
+  const [storedConnectionString, setStoredConnectionString] = useState<string>();
   // const [results, setResults] = useState();
   // const [isLoading, setIsLoading] = useState(true);
-  const setupClient = async () => {
-    const client = createClient();
-    await client.connect();
-    setRedis(client);
+
+  const setupConnectionString = async function () {
+    const loadedConnString = await LocalStorage.getItem<string>(CONNECTION_KEY);
+    console.log("trying to load conn string ", loadedConnString);
+    if (loadedConnString) {
+      console.log("conn string loaded: ", loadedConnString);
+      setStoredConnectionString(loadedConnString);
+    } else {
+      setStoredConnectionString(DEFAULT_URL);
+    }
   };
-  if (!redis) {
-    setupClient();
-  }
+
+  const setupClient = async () => {
+    try {
+      const client = createClient({ url: storedConnectionString });
+      await client.connect();
+      setRedis(client);
+    } catch (e) {
+      setErrored(true);
+      showToast({ style: Toast.Style.Failure, title: "Error", message: e.message });
+      console.log(e);
+    }
+  };
+
+  useEffect(() => {
+    setupConnectionString();
+  }, []);
+
+  useEffect(() => {
+    if (!redis && !errored) {
+      setupClient();
+    }
+  }, [storedConnectionString]);
 
   const handleSubmit = async ({ tag }: { tag: string }) => {
     const { text } = await Clipboard.read();

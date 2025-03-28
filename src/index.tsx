@@ -1,10 +1,8 @@
-import { getSelectedText, ActionPanel, Action, List, closeMainWindow, openExtensionPreferences } from "@raycast/api";
-// import { useFetch, Response } from "@raycast/utils";
+import { LocalStorage, getSelectedText, ActionPanel, Action, List, closeMainWindow } from "@raycast/api";
 import { useState, useEffect } from "react";
-// import { URLSearchParams } from "node:url";
 import { createClient } from "redis";
-import { Clipboard } from "@raycast/api";
-import { redisKey } from "./conf";
+import { Clipboard, Toast, showToast } from "@raycast/api";
+import { redisKey, CONNECTION_KEY, DEFAULT_URL } from "./conf";
 
 export type RedisClientType = ReturnType<typeof createClient>;
 
@@ -13,11 +11,27 @@ interface SearchResult {
   value: string;
 }
 
-export default function Command() {
+export default async function Command() {
   const [searchText, setSearchText] = useState("");
   const [redis, setRedis] = useState<RedisClientType>();
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errored, setErrored] = useState<boolean>(false);
+
+  const [storedConnectionString, setStoredConnectionString] = useState<string>("");
+
+  const setupConnectionString = async function () {
+    const loadedConnString = await LocalStorage.getItem<string>(CONNECTION_KEY);
+    console.log("trying to load conn string ", loadedConnString);
+    if (loadedConnString) {
+      console.log("conn string loaded: ", loadedConnString);
+      setStoredConnectionString(loadedConnString);
+      return loadedConnString;
+    } else {
+      setStoredConnectionString(DEFAULT_URL);
+      return DEFAULT_URL;
+    }
+  };
 
   const addItem = async function (tag: string) {
     // let text: string | undefined = await getSelectedText();
@@ -32,12 +46,28 @@ export default function Command() {
     closeMainWindow();
   };
 
-  async function removeItem(tag: string, updateData: () => void) {
-    const client = createClient();
-    await client.connect();
-    if (client) {
-      client.hDel(redisKey, tag);
+  const storeConnectionString = async function () {
+    // let text: string | undefined = await getSelectedText();
+    // if (text === null || text === "") {
+    // }
+    const text: string | undefined = await Clipboard.readText();
+    if (text !== null && text !== undefined) {
+      const result = await LocalStorage.setItem(CONNECTION_KEY, text);
+      console.log(result);
+      closeMainWindow();
+
+      // if (redis) {
+      //   redis.hSet(redisKey, tag, text);
+      // }
     }
+    //closeMainWindow();
+  };
+
+  async function removeItem(tag: string, updateData: () => void) {
+    if (redis) {
+      redis.hDel(redisKey, tag);
+    }
+
     updateData();
   }
 
@@ -80,17 +110,36 @@ export default function Command() {
   }
 
   const setupClient = async () => {
-    const client = createClient();
-    await client.connect();
-    setRedis(client);
+    try {
+      const client = createClient({ url: storedConnectionString });
+      await client.connect();
+      setRedis(client);
+    } catch (e) {
+      setErrored(true);
+      showToast({ style: Toast.Style.Failure, title: "Error", message: e.message });
+      console.log(e);
+    }
   };
-  if (!redis) {
-    setupClient();
-  }
 
   useEffect(() => {
-    updateData();
-  }, [redis, searchText]);
+    if (storedConnectionString == "") {
+      setupConnectionString().then((loaded) => {
+        showToast({ style: Toast.Style.Success, title: "setup conn string", message: loaded });
+      });
+    }
+
+    if (storedConnectionString != "" && !redis) {
+      setupClient();
+      showToast({ style: Toast.Style.Success, title: "Using Connection", message: storedConnectionString });
+    }
+    if (storedConnectionString != "" && redis && results.length == 0) {
+      updateData();
+    }
+  }, [storedConnectionString]);
+
+  // useEffect(() => {
+  //   updateData();
+  // }, [redis, searchText]);
 
   //const updateSearch = async (searchText:string) => {
   //  if (client) {
@@ -102,18 +151,11 @@ export default function Command() {
   const updateData: () => void = async () => {
     setIsLoading(true);
     if (redis) {
-      const results = await redis.hGetAll(redisKey);
-      const searchResults = Object.entries(results).map(([key, value]) => {
+      const res = await redis.hGetAll(redisKey);
+      const searchResults = Object.entries(res).map(([key, value]) => {
         return { tag: key, value };
       });
-      // return json.results.map((result) => {
-      //   return {
-      //     name: result.package.name,
-      //     description: result.package.description,
-      //     username: result.package.publisher?.username,
-      //     url: result.package.links.npm,
-      //   } as SearchResult;
-      // });
+      showToast({ style: Toast.Style.Success, title: "Updated Data", message: JSON.stringify(searchResults[0]) });
       setResults(searchResults);
     }
     setIsLoading(false);
@@ -132,39 +174,20 @@ export default function Command() {
           <SearchListItem key={searchResult.tag} updateData={updateData} searchResult={searchResult} />
         ))}
         <AddListItem key={"add-key"} searchText={searchText} />
+        <List.Item
+          key={"config-entry"}
+          title={`change connection string`}
+          subtitle={"uses clipboard contents"}
+          actions={
+            <ActionPanel>
+              <Action title="Settings" onAction={storeConnectionString} />
+            </ActionPanel>
+          }
+        />
       </List.Section>
     </List>
   );
 }
-
-/** Parse the response from the fetch query into something we can display */
-// async function parseFetchResponse(response: Response) {
-//   const json = (await response.json()) as
-//     | {
-//         results: {
-//           package: {
-//             name: string;
-//             description?: string;
-//             publisher?: { username: string };
-//             links: { npm: string };
-//           };
-//         }[];
-//       }
-//     | { code: string; message: string };
-
-//   if (!response.ok || "message" in json) {
-//     throw new Error("message" in json ? json.message : response.statusText);
-//   }
-
-//   return json.results.map((result) => {
-//     return {
-//       name: result.package.name,
-//       description: result.package.description,
-//       username: result.package.publisher?.username,
-//       url: result.package.links.npm,
-//     } as SearchResult;
-//   });
-// }
 
 interface SearchResult {
   tag: string;
